@@ -1,0 +1,34 @@
+#!/bin/sh
+#
+#    Copyright (C) 2011 Fundacio Privada per a la Xarxa Oberta, Lliure i Neutral guifi.net
+#
+#    This program is free software; you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation; either version 2 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License along
+#    with this program; if not, write to the Free Software Foundation, Inc.,
+#    51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+#
+#    The full GNU General Public License is included in this distribution in
+#    the file called "COPYING".
+#
+# Contributors:
+#	Simó Albert i Beltran
+#
+
+# Update the clamp MSS TCP rule to new interface name of bmx6 with tunnels on-demand.
+sed -i -e "s/^iptables -A FORWARD -p tcp -o bmx6_+ -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu$/iptables -A FORWARD -p tcp -o bmx+ -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu/g" /etc/firewall.user
+
+if grep -q -e "^# Clamp MSS TCP rule to fix MTU problems" /etc/firewall.user; then exit 0; fi
+
+cat << EOF >> /etc/firewall.user
+# Clamp MSS TCP rule to fix MTU problems
+iptables -A FORWARD -p tcp -o bmx+ -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+EOF

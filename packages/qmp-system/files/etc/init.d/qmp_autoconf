@@ -1,0 +1,134 @@
+#!/bin/sh /etc/rc.common
+#    Copyright (C) 2011 Fundacio Privada per a la Xarxa Oberta, Lliure i Neutral guifi.net
+#
+#    This program is free software; you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation; either version 2 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License along
+#    with this program; if not, write to the Free Software Foundation, Inc.,
+#    51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+#
+#    The full GNU General Public License is included in this distribution in
+#    the file called "COPYING".
+#
+# Contributors:
+#	Simó Albert i Beltran
+#
+
+START=99
+STOP=99
+SERVICE_DAEMONIZE=1
+CONTROL_FILE="/qmp_configured"
+BIRTH_FILE="/etc/qmp/.birth"
+QMP_DIR="/etc/qmp"
+QMP_KEY="/tmp/qmp_key"
+QMP_LOG="/root/qmp_autoconf.log"
+
+log() {
+	echo -e "$@" > /dev/console
+	echo -e "$@"
+}
+
+exechooks() {
+	local stage=${1:-anyboot}
+	. $QMP_DIR/qmp_common.sh
+	qmp_hooks_exec $stage
+}
+
+stop_services() {
+	/etc/init.d/dnsmasq stop
+	/etc/init.d/gwck stop
+	/etc/init.d/bmx6 stop
+	/etc/init.d/uhttpd stop
+}
+
+prepare_wifi() {
+	i=0
+	radios=$(uci show wireless | grep wireless\.radio.*wifi-device -c)
+	while [ $i -lt $radios ]; do
+		uci set wireless.radio${i}.disabled="0" 2>/dev/null
+		uci set wireless.radio${i}.country="$country" 2>/dev/null
+		i=$(($i+1))
+	done
+
+	uci commit wireless
+	wifi up
+	sleep 10
+
+	log WiFi devices:
+	log --------------------------------------------------
+	log $(iwinfo)
+	log --------------------------------------------------
+}
+
+configure() {
+	stop_services
+	log Redirecting stderr to $QMP_LOG
+	exec 2>>$QMP_LOG 1>&2
+	log Starting qmp configuration...
+	log Waiting 10 seconds to be sure all is configured
+	sleep 10
+
+	log "[Preparing wifi]"
+	country="$(uci get qmp.wireless.country 2>/dev/null)"
+	country="${country:-00}"
+	log Using countrycode $country
+	prepare_wifi
+
+	# Execute birth hooks if it is the first boot of the device
+	[ ! -e "$BIRTH_FILE" ] && exechooks birth && touch "$BIRTH_FILE"
+
+	# Configure system and reboot
+	. $QMP_DIR/qmp_functions.sh
+	log "[Configuring initial system]"
+	qmp_configure_initial
+	log "[Configuring full system]"
+	qmp_configure
+
+	log Rebooting
+	touch "$CONTROL_FILE"
+	[ -f "$CONTROL_FILE" ] && reboot || log CRITICAL, cannot write file $CONTROL_FILE
+}
+
+# This function is executed in each boot
+startup() {
+	# Set HostName
+	. $QMP_DIR/qmp_system.sh
+	qmp_set_hosts
+	[ $(qmp_uci_get services.bwtest) -eq 1 ] && qmp_enable_netserver
+	
+	# Run hooks
+	exechooks anyboot
+
+	# Generate current qmp key
+	logread | md5sum | awk '{print $1}' > $QMP_KEY
+
+	# Start firewall 
+	sh /etc/firewall.user
+}
+
+start() {
+	if [ ! -e "$CONTROL_FILE" ]; then
+		configure
+	else
+		echo "qMp already configured. Remove $CONTROL_FILE to force reconfiguration"
+	fi
+
+	startup
+}
+
+stop() {
+	log Nothing to do
+}
+
+restart() {
+	stop
+	start
+}

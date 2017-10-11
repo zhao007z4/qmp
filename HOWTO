@@ -1,0 +1,88 @@
+#################################
+## 1. Compilation instructions ##
+#################################
+
+## 1.1 qmpfw 
+We provide a tool to compile the sources (OpenWRT plus qMp), it can be found here: http://qmp.cat/projects/qmpfw
+
+Or just clone the repository:
+  git clone git://qmp.cat/qmpfw.git
+
+And compile it to your target:
+  cd qmpfw
+  make T=alix
+
+To see available targets execute:
+  make list_targets
+
+## 1.2 Adding qMp as a feed for an existing OpenWRT buildoort
+
+### 1.2.1 Adding feeds
+Modify your feeds.conf file and add these three new entries:
+
+  src-git qmp git://qmp.cat/qmp.git
+  src-git b6m git://qmp.cat/b6m.git
+  src-git gwck git://qmp.cat/gwck.git
+
+Then execute:
+  scripts/feeds update -a
+  scripts/feeds install -a
+
+If you don't have the OpenWRT build root you can download it executing:
+svn co svn://svn.openwrt.org/openwrt/branches/backfire
+
+### 1.2.2 Configuring system
+make menuconfig
+* Target System  (BCM947xxx, x86, atheros,...)
+* Target Profile (WGT634u, wrap, alix, routerstation,...)
+(* Global build-settings -> Compile the kernel with profiling enabled )
+(* Advanced configuration options for developers -> Toolchain options -> Build gdb )
+* qMp ->
+    qmp-big-node # for 8Mbyte flash devices
+    qmp-small-node # for 4MByte flash devices 
+
+* remove for 4MByte-flash devices: network -> ppp
+* remove for 4MByte-flash devices: network -> ppad-mini
+
+### 1.2.3 Compiling
+time make V=99
+
+
+##################################################
+## 2. Specific device installation instructions ##
+##################################################
+
+## wgt634u: (tested)
+scp bin/brcm47xx/openwrt-brcm47xx-squashfs.trx root@192.168.1.1:/tmp/
+ssh root@192.168.1.1
+mtd -r write /tmp/openwrt-brcm47xx-squashfs.trx linux # do not reboot for a while to let filesystem cleanup
+
+## fonera: (tested)
+scp bin/atheros/openwrt-atheros-vmlinux.lzma bin/atheros/openwrt-atheros-root.squashfs root@192.168.1.1:/tmp/
+ssh root@192.168.1.1
+mtd -e vmlinux.bin.l7 write /tmp/openwrt-atheros-vmlinux.lzma vmlinux.bin.l7
+mtd -r -e rootfs write /tmp/openwrt-atheros-root.squashfs rootfs
+
+## PC-Engines WRAP board: (tested backfire rev 27441)
+sudo dd if=bin/x86/openwrt-x86-generic-combined-squashfs.img of=/dev/sdX
+
+## alix: (untested)
+sudo dd if=bin/x86/openwrt-x86-generic-combined-squashfs.img of=/dev/sdX
+
+## routerstation:
+tftp 192.168.1.20
+ mode octet
+ trace on
+ put openwrt*ubnt*.bin
+
+## Routerstation PRO: (tested backfire rev 27441)
+http://wiki.openwrt.org/toh/ubiquiti/routerstation.pro
+apt-get install tftp-hpa
+# screen -S serial115200 /dev/ttyUSB0 115200 # connect with usb-serial + female-female adapter straight to rspro
+ifconfig eth2 192.168.1.1
+ping 192.168.1.20 # in another shell
+press rspro reset button (for some seconds) while connecting power! Once ping replies do:
+tftp 192.168.1.20 -m binary -c put openwrt-ar71xx-ubnt-rspro-squashfs-factory.bin
+or flashing from inside:
+sysupgrade -n /tmp/openwrt-ar71xx-ubnt-rspro-squashfs-sysupgrade.bin
+
