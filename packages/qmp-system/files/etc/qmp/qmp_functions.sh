@@ -43,34 +43,49 @@ qmp_check_device() {
 	ip link show $1 1> /dev/null 2>/dev/null
 	return $?
 }
-
+# Function qmp_set_vlan()
+#
+# This function creates a VLAN interface on top of an interface in order to
+# isolate the routing protocol traffic there:
+#
+#  - 802.1 VLANs are used for wireless interfaces.
+#  - 802.1ad (QinQ) VLANs are used for wired devices since qMp > 3.2.1
 qmp_set_vlan() {
-  local viface="$1" # lan/wan/meshX
-  local vid=$2
-  [ -z "$viface" ] || [ -z "$vid" ] && return
+  local iface="$1" # The physical interface
+  local vid=$2     # The VLAN
+  local liface=$3  # The logical interface lan/wan_X/mesh_Y
 
-  uci set network.${viface}_${vid}=device
-  if [ -e "/sys/class/net/$dev/phy80211" ]; then
-    # 802.1Q VLANs for wireless interfaces
-    uci set network.${viface}_${vid}.type=8021q
-  else
-    # [QinQ backport] 802.1q VLANs for wired interfaces
-    uci set network.${viface}_${vid}.type=8021q
-  fi
-  uci set network.${viface}_${vid}.name=${viface}_${vid}
-  if [ -e "/sys/class/net/$dev/phy80211" ]; then
-    # 802.1Q VLANs for wireless interfaces
-    uci set network.${viface}_${vid}.ifname='@'${viface}
-  else
-    # [QinQ backport] 802.1q VLANs for wired interfaces
-    uci set network.${viface}_${vid}.ifname=$3
-  fi
-  uci set network.${viface}_${vid}.vid=${vid}
+  echo "Setting VLAN $vid for interface $iface"
+  [ -z "$iface" ] || [ -z "$vid" ] && return
 
-  uci set network.${viface}_${vid}_ad=interface
-  uci set network.${viface}_${vid}_ad.ifname=${viface}_${vid}
-  uci set network.${viface}_${vid}_ad.proto=${none}
-  uci set network.${viface}_${vid}_ad.auto=1
+  # Replace dots by underscores to use the interface name as part of another one
+  local uiface="$(echo $iface | sed -r 's/\./_/g')" 
+
+  uci set network.${uiface}_${vid}=device
+  if [ -e "/sys/class/net/$dev/phy80211" ]; then
+    # 802.1q VLANs for wireless interfaces
+    uci set network.${uiface}_${vid}.type=8021q
+  else
+    # 802.1ad VLANs for wired interfaces
+    uci set network.${uiface}_${vid}.type=8021ad
+  fi
+
+  uci set network.${uiface}_${vid}.name=${uiface}_${vid}
+  if [ -e "/sys/class/net/$dev/phy80211" ]; then
+    # VLANs for wireless interfaces need to be configured on top of the
+    # logical interface the radio is put in (e.g. mesh_w0 for wlan0)
+    uci set network.${uiface}_${vid}.ifname='@'${liface}
+  else
+    # VLANs for wired interfaces are configured directly on top of the physical
+    # interface (e.g. eth0.2, eth1)
+    uci set network.${uiface}_${vid}.ifname=${iface}
+  fi
+  uci set network.${uiface}_${vid}.vid=${vid}
+
+  uci set network.${uiface}_${vid}_ad=interface
+  uci set network.${uiface}_${vid}_ad.ifname=${uiface}_${vid}
+  uci set network.${uiface}_${vid}_ad.proto=${none}
+  uci set network.${uiface}_${vid}_ad.auto=1
   uci commit network
 
 }
@@ -143,28 +158,30 @@ qmp_get_devices() {
   local devices=""
 
   if [ "$1" == "mesh" ]; then
-    local brlan_enabled=0
-    for dev in $(uci get qmp.interfaces.mesh_devices 2>/dev/null); do
-
-        # Looking if device is defined as LAN, in such case dev=br-lan, but only once
-        # except eth1 for RouterStation Pro
-        if ! ( [[ "$dev" == "eth1" ]] && qmp_is_routerstationpro ) ; then
-            for landev in $(uci get qmp.interfaces.lan_devices 2>/dev/null); do
-                if [ "$landev" == "$dev" ] && [ ! -e "/sys/class/net/$dev/phy80211" ] ; then
-                    if [ $brlan_enabled -eq 0 ]; then
-                        dev="br-lan"
-                        brlan_enabled=1
-                    else
-                        dev=""
-                    fi
-                    break
-                fi
-            done
-        fi
-
-      [ -n "$dev" ] && devices="$devices $dev"
-    done
-  fi
+		devices="$(uci get qmp.interfaces.mesh_devices 2>/dev/null)"
+	fi
+  #   local brlan_enabled=0
+  #   for dev in $(uci get qmp.interfaces.mesh_devices 2>/dev/null); do
+	# 
+  #       # Looking if device is defined as LAN, in such case dev=br-lan, but only once
+  #       # except eth1 for RouterStation Pro
+  #       if ! ( [[ "$dev" == "eth1" ]] && qmp_is_routerstationpro ) ; then
+  #           for landev in $(uci get qmp.interfaces.lan_devices 2>/dev/null); do
+  #               if [ "$landev" == "$dev" ] && [ ! -e "/sys/class/net/$dev/phy80211" ] ; then
+  #                   if [ $brlan_enabled -eq 0 ]; then
+  #                       dev="br-lan"
+  #                       brlan_enabled=1
+  #                   else
+  #                       dev=""
+  #                   fi
+  #                   break
+  #               fi
+  #           done
+  #       fi
+	# 
+  #     [ -n "$dev" ] && devices="$devices $dev"
+  #   done
+  # fi
 
   if [ "$1" == "lan" ]; then
      devices="$(uci get qmp.interfaces.lan_devices 2>/dev/null)"
@@ -323,7 +340,7 @@ qmp_attach_device_to_interface() {
 }
 
 qmp_is_routerstationpro() {
-	cat /proc/cpuinfo | grep -q "^machine[[:space:]]*: Ubiquiti RouterStation Pro$"
+	cat /proc/cpuinfo | grep -q "^machine[[:space:]]*: No Ubiquiti RouterStation Pro at all$"
 }
 
 qmp_configure_routerstationpro_switch() {
@@ -774,6 +791,11 @@ qmp_configure_bmx6() {
   uci set $conf.bmx6_sms_plugin=plugin
   uci set $conf.bmx6_sms_plugin.plugin=bmx6_sms.so
 
+if [ -f /lib/bmx6_topology.so ]; then
+  uci set $conf.bmx6_topology_plugin=plugin
+  uci set $conf.bmx6_topology_plugin.plugin=bmx6_topology.so
+fi
+
   # chat file must be syncronized using sms
   cfg_sms=$(uci add $conf syncSms)
   uci set $conf.${cfg_sms}.syncSms=chat
@@ -783,40 +805,41 @@ qmp_configure_bmx6() {
 
   local primary_mesh_device="$(qmp_get_primary_device)"
 
-  local community_node_id=$(qmp_get_id)
-
+  local device_id=$(qmp_get_id)
+	device_id="$(echo -n $device_id | tr -cd 'ABCDEFabcdef0123456789' | tail -c 4)"
   if qmp_uci_test qmp.interfaces.mesh_devices &&
   qmp_uci_test qmp.networks.mesh_protocol_vids
 
     then
     local counter=1
 
-	for dev in $(qmp_get_devices mesh); do
-	for protocol_vid in $(uci get qmp.networks.mesh_protocol_vids); do
+  for dev in $(qmp_get_devices mesh); do
+    echo "Configuring interface $dev in BMX6"
 
-	local protocol_name="$(echo $protocol_vid | awk -F':' '{print $1}')"
+    for protocol_vid in $(uci get qmp.networks.mesh_protocol_vids); do
+      local protocol_name="$(echo $protocol_vid | awk -F':' '{print $1}')"
 
-	if [ "$protocol_name" = "bmx6" ] ; then
+      if [ "$protocol_name" = "bmx6" ] ; then
+        # Check if the current device is configured as no-vlan
+        local use_vlan=1
+        for no_vlan_int in $(qmp_uci_get interfaces.no_vlan_devices); do
+          [ "$no_vlan_int" == "$dev" ] && use_vlan=0
+        done
 
-	# Check if the current device is configured as no-vlan
-	local use_vlan=1
-	for no_vlan_int in $(qmp_uci_get interfaces.no_vlan_devices); do
-		[ "$no_vlan_int" == "$dev" ] && use_vlan=0
-	done
+        # Check if the protocol has VLAN tag configured
+        local vid="$(echo $protocol_vid | awk -F':' '{print $2}')"
+        [ -z "$vid" -o $vid -lt 1 ] && use_vlan=0
 
-	# Check if the protocol has VLAN tag configured
-	local vid="$(echo $protocol_vid | awk -F':' '{print $2}')"
-	[ -z "$vid" -o $vid -lt 1 ] && use_vlan=0
+        # Check if the protocol has VLAN tag configured
+        local vid="$(echo $protocol_vid | awk -F':' '{print $2}')"
+        [ -z "$vid" -o $vid -lt 1 ] && use_vlan=0
 
-	# Check if the protocol has VLAN tag configured
-	local vid="$(echo $protocol_vid | awk -F':' '{print $2}')"
-	[ -z "$vid" -o $vid -lt 1 ] && use_vlan=0
+        # If vlan tagging
+        if [ $use_vlan -eq 1 ]; then
+          # For interfaces like eth0.1, replace the dot with an underscore
+          local viface="$(echo $dev | sed -r 's/\./_/g')"
+          local ifname="${viface}_${vid}"
 
-	# If vlan tagging
-		if [ $use_vlan -eq 1 ]; then
-			local viface="$(qmp_get_virtual_iface $dev)"
-			local ifname="${viface}_${vid}"
-			
 	# If not vlan tagging
 		else
 			local ifname="$dev"
@@ -860,10 +883,10 @@ qmp_configure_bmx6() {
 
 
   if qmp_uci_test qmp.networks.bmx6_ripe_prefix48 ; then
-    uci set $conf.general.tun6Address="$(uci get qmp.networks.bmx6_ripe_prefix48):$community_node_id:0:0:0:1/64"
+    uci set $conf.general.tun6Address="$(uci get qmp.networks.bmx6_ripe_prefix48):$device_id:0:0:0:1/64"
     uci set $conf.tmain=tunDev
     uci set $conf.tmain.tunDev=tmain
-    uci set $conf.tmain.tun6Address="$(qmp_uci_get networks.bmx6_ripe_prefix48):$community_node_id:0:0:0:1/64"
+    uci set $conf.tmain.tun6Address="$(qmp_uci_get networks.bmx6_ripe_prefix48):$device_id:0:0:0:1/64"
   fi
 
   qmp_configure_bmx6_gateways
@@ -902,4 +925,3 @@ qmp_configure() {
   qmp_configure_lan_v6
   qmp_hooks_exec postconf
 }
-

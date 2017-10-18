@@ -25,11 +25,13 @@
 include $(TOPDIR)/rules.mk
 include $(INCLUDE_DIR)/kernel.mk
 
-QMP_RELEASE?=3.2.1
-QMP_CODENAME?=Clearance
+QMP_RELEASE?=trunk
+QMP_PKGRELEASE=r20170831-1
+QMP_CODENAME?=Kalimotxo
+QMP_BUILDDATE:=$(shell date +%Y%m%d-%H%M)
 
 PKG_NAME:=qmp-tiny-node
-PKG_VERSION:=$(QMP_RELEASE)
+PKG_VERSION:=$(QMP_RELEASE)-$(QMP_PKGRELEASE)
 PKG_RELEASE:=$(QMP_CODENAME)
 PKG_LICENSE:=GPL-2.0+
 
@@ -38,28 +40,27 @@ PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)
 include $(INCLUDE_DIR)/package.mk
 
 define Package/qmp-tiny-node
+  TITLE:=Quick Mesh Project (qMp) minimalistic node (4 MB flash)
   SECTION:=net
   CATEGORY:=qMp
-  TITLE:=Minimalistic qMp node (4 MB flash devices)
-  URL:=http://qmp.cat
+  URL:=https://qmp.cat
   DEPENDS:= +qmp-system \
-	+bmx6 +bmx6-uci-config +bmx6-json +bmx6-sms +luci-app-bmx6 +gwck-qmp \
-	+ip +iw +iwinfo \
-	+luci-mod-admin-full +luci-theme-bootstrap +luci-i18n-english \
-	+uhttpd +uhttpd-mod-ubus
+	+luci-app-bmx6 +luci-theme-bootstrap +uhttpd \
+	+uhttpd-mod-ubus
 endef
 
 define Package/qmp-tiny-node/description
- This metapackage installs the packages required for setting up a minimal qMp node:
+ This metapackage provides a minimalistic qMp node with just the bare minimum
+ features:
+  - qMp system configuration files and scripts
   - BMX6 routing protocol
-  - Luci web interface
-  - qMp system configuration files
+  - Minimalistic LuCI web interface (only for qMp settings)
 
- It is intended to be used on devices with 4 MB of flash.
+ It is intended to be used on storage-constrained devices with 4 MB flash.
 endef
 
 define Build/Prepare
- mkdir -p $(PKG_BUILD_DIR)
+	mkdir -p $(PKG_BUILD_DIR)
 endef
 
 define Build/Configure
@@ -73,4 +74,3 @@ define Package/qmp-tiny-node/install
 endef
 
 $(eval $(call BuildPackage,qmp-tiny-node))
-
